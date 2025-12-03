@@ -4,7 +4,7 @@
 
 # OGBench-TL: Benchmarking Offline Goal-Conditioned RL with Temporal Logic Tasks Visualization Enhancements
 
-<div align="center" style="margin-bottom: 2rem">
+<div align="center" style="margin-bottom: 20px">
     <img alt="Python Version" src="https://img.shields.io/badge/python-3.8%2B-blue?style=for-the-badge&logo=python&logoColor=grey&labelColor=%23fef7e7&color=%23FACD60"/>
     <img alt="License" src="https://img.shields.io/badge/license-MIT-green?style=for-the-badge&logo=github&logoColor=grey&labelColor=%23fef7e7&color=%23419156"/>
 </div>
