@@ -682,7 +682,29 @@ def make_maze_env(
             return self.maze_map.copy()
             
         def get_maze_params(self):
-            """Return maze parameters."""
+            """Return maze parameters.
+            Returns:
+                A dictionary containing maze parameters.
+                - maze_type: Maze type.
+                - maze_unit: Size of a maze unit block.
+                - maze_height: Height of the maze walls.
+                - maze_map: 2D numpy array representing the maze structure.
+                - offset_x: X offset of the maze.
+                - offset_y: Y offset of the maze.
+                - x_grids: Number of grid cells in the x direction.
+                - y_grids: Number of grid cells in the y direction.
+                - x_range: Tuple representing the x range of the maze.
+                - y_range: Tuple representing the y range of the maze.
+            """
+            y_grids, x_grids = self.maze_map.shape
+            x_range = (
+                -self._offset_x - 0.5 * self._maze_unit,
+                x_grids * self._maze_unit - self._offset_x + 0.5 * self._maze_unit,
+            )
+            y_range = (
+                -self._offset_y - 0.5 * self._maze_unit,
+                y_grids * self._maze_unit - self._offset_y + 0.5 * self._maze_unit,
+            )
             params = {
                 "maze_type": self._maze_type,
                 "maze_unit": self._maze_unit,
@@ -690,6 +712,10 @@ def make_maze_env(
                 "maze_map": self.maze_map,
                 "offset_x": self._offset_x,
                 "offset_y": self._offset_y,
+                "x_grids": x_grids,
+                "y_grids": y_grids,
+                "x_range": x_range,
+                "y_range": y_range,
             }
             return params
 
