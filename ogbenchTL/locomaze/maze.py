@@ -676,6 +676,18 @@ def make_maze_env(
             else:
                 frame = self.render()
                 return frame
+            
+        def get_maze_params(self):
+            """Return maze parameters."""
+            params = {
+                "maze_type": self._maze_type,
+                "maze_unit": self._maze_unit,
+                "maze_height": self._maze_height,
+                "maze_map": self.maze_map,
+                "offset_x": self._offset_x,
+                "offset_y": self._offset_y,
+            }
+            return params
 
         def get_oracle_rep(self):
             """Return the oracle goal representation (i.e., the goal position)."""
