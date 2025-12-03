@@ -1,4 +1,4 @@
-<div align="center" style="margin: 20px 0px;">
+<div align="center">
     <img src="assets/ogbenchtl.svg" width="300px"/>
 </div>
 
