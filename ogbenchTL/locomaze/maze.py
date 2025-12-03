@@ -677,6 +677,10 @@ def make_maze_env(
                 frame = self.render()
                 return frame
             
+        def get_maze_map(self):
+            """Return the maze map."""
+            return self.maze_map.copy()
+            
         def get_maze_params(self):
             """Return maze parameters."""
             params = {
