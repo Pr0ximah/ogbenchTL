@@ -184,6 +184,10 @@ def make_env_and_datasets(
     if env_only:
         return env
 
+    # @DEBUG: Add dataset mapping for TLEnv
+    if env_name == "tl-manip-v0":
+        dataset_name = "cube-single-play-v0"
+
     # Load datasets.
     if dataset_path is None:
         dataset_dir = os.path.expanduser(dataset_dir)

@@ -95,6 +95,25 @@ class ManipSpaceEnv(CustomMuJoCoEnv):
         self._reward_task_id = reward_task_id
         self._use_oracle_rep = use_oracle_rep
 
+        self._arm_material_names = (
+            'ur5e/robotiq/metal',
+            'ur5e/robotiq/silicone',
+            'ur5e/robotiq/gray',
+            'ur5e/robotiq/black',
+            'ur5e/robotiq/pad_gray',
+            'ur5e/black',
+            'ur5e/jointgray',
+            'ur5e/linkgray',
+            'ur5e/lightblue',
+        )
+        self._arm_transparency = 1.0
+        self._camera_arm_transparency = {}
+        if self._pixel_transparent_arm:
+            self._camera_arm_transparency['top'] = 0.2
+            if self._ob_type == 'pixels':
+                self._camera_arm_transparency['front_pixels'] = 0.1
+        self._last_render_camera = None
+
         assert ob_type in ['states', 'pixels']
 
         # Initialize inverse kinematics controller.
@@ -207,15 +226,10 @@ class ManipSpaceEnv(CustomMuJoCoEnv):
             arena_mjcf.find('material', 'ur5e/robotiq/black').rgba = self._colors['purple']
             arena_mjcf.find('material', 'ur5e/robotiq/pad_gray').rgba = self._colors['purple']
             if self._pixel_transparent_arm:
-                arena_mjcf.find('material', 'ur5e/robotiq/metal').rgba[3] = 0.1
-                arena_mjcf.find('material', 'ur5e/robotiq/silicone').rgba[3] = 0.1
-                arena_mjcf.find('material', 'ur5e/robotiq/gray').rgba[3] = 0.1
-                arena_mjcf.find('material', 'ur5e/robotiq/black').rgba[3] = 0.1
-                arena_mjcf.find('material', 'ur5e/robotiq/pad_gray').rgba[3] = 0.5
-                arena_mjcf.find('material', 'ur5e/black').rgba[3] = 0.1
-                arena_mjcf.find('material', 'ur5e/jointgray').rgba[3] = 0.1
-                arena_mjcf.find('material', 'ur5e/linkgray').rgba[3] = 0.1
-                arena_mjcf.find('material', 'ur5e/lightblue').rgba[3] = 0.1
+                self._apply_arm_transparency_to_mjcf(
+                    arena_mjcf,
+                    self._camera_arm_transparency.get('front_pixels', self._arm_transparency),
+                )
 
         # Add bounding boxes to visualize the workspace and object sampling bounds.
         mjcf_utils.add_bounding_box_site(
@@ -236,6 +250,25 @@ class ManipSpaceEnv(CustomMuJoCoEnv):
         )
 
         return arena_mjcf
+
+    def _apply_arm_transparency_to_mjcf(self, root_elem, alpha: float) -> None:
+        alpha = float(np.clip(alpha, 0.0, 1.0))
+        for mat_name in self._arm_material_names:
+            material = root_elem.find('material', mat_name)
+            if material is None:
+                continue
+            rgba = list(material.rgba)
+            rgba[3] = alpha
+            material.rgba = tuple(rgba)
+
+    def _apply_arm_transparency(self, model, alpha: float) -> None:
+        alpha = float(np.clip(alpha, 0.0, 1.0))
+        for mat_name in self._arm_material_names:
+            try:
+                mat_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_MATERIAL, mat_name)
+            except ValueError:
+                continue
+            model.mat_rgba[mat_id, 3] = alpha
 
     def add_objects(self, arena_mjcf):
         pass
@@ -296,8 +329,12 @@ class ManipSpaceEnv(CustomMuJoCoEnv):
                 self.cur_task_info = options['task_info']
             else:
                 # Randomly sample a task.
-                self.cur_task_id = np.random.randint(1, self.num_tasks + 1)
-                self.cur_task_info = self.task_infos[self.cur_task_id - 1]
+                try:
+                    self.cur_task_id = np.random.randint(1, self.num_tasks + 1)
+                    self.cur_task_info = self.task_infos[self.cur_task_id - 1]
+                except Exception:
+                    # print("Error sampling task ID. No task provided.")
+                    pass
 
             # Whether to provide a rendering of the goal.
             self._render_goal = False
@@ -474,5 +511,25 @@ class ManipSpaceEnv(CustomMuJoCoEnv):
     ):
         if camera is None:
             camera = 'front' if self._ob_type == 'states' else 'front_pixels'
-
+        target_alpha = self._camera_arm_transparency.get(camera, self._arm_transparency)
+        if self._model is not None:
+            self._apply_arm_transparency(self._model, target_alpha)
+        self._last_render_camera = camera
         return super().render(camera=camera, *args, **kwargs)
+
+    def set_arm_transparency(self, alpha: float, camera: str | None = None) -> None:
+        alpha = float(np.clip(alpha, 0.0, 1.0))
+        if camera is None:
+            self._arm_transparency = alpha
+        else:
+            if alpha == self._arm_transparency:
+                self._camera_arm_transparency.pop(camera, None)
+            else:
+                self._camera_arm_transparency[camera] = alpha
+        if self._model is not None:
+            active_camera = camera if camera is not None else self._last_render_camera
+            if active_camera is None or active_camera == self._last_render_camera:
+                self._apply_arm_transparency(
+                    self._model,
+                    self._camera_arm_transparency.get(self._last_render_camera, self._arm_transparency),
+                )
