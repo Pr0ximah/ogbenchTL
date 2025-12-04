@@ -700,11 +700,11 @@ def make_maze_env(
             y_grids, x_grids = self.maze_map.shape
             x_range = (
                 -self._offset_x - 0.5 * self._maze_unit,
-                x_grids * self._maze_unit - self._offset_x + 0.5 * self._maze_unit,
+                x_grids * self._maze_unit - self._offset_x - 0.5 * self._maze_unit,
             )
             y_range = (
                 -self._offset_y - 0.5 * self._maze_unit,
-                y_grids * self._maze_unit - self._offset_y + 0.5 * self._maze_unit,
+                y_grids * self._maze_unit - self._offset_y - 0.5 * self._maze_unit,
             )
             params = {
                 "maze_type": self._maze_type,
