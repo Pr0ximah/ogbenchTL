@@ -491,6 +491,7 @@ def make_maze_env(
                 geom.rgba[3] = 1.0
             geom.pos[0] = position[0]
             geom.pos[1] = position[1]
+            geom.pos[2] = 0.8
 
         def reset_wp_indicator(self):
             """Reset the waypoint indicator position."""
