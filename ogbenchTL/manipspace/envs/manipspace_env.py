@@ -503,6 +503,104 @@ class ManipSpaceEnv(CustomMuJoCoEnv):
         else:
             return False
 
+    # --------------------------------------------------------------------------
+    # Arm state saving & ghost rendering utilities.
+    # --------------------------------------------------------------------------
+
+    def get_arm_state(self):
+        """Return a snapshot of the current arm-related state.
+
+        The snapshot can later be used to render ghost arms for trajectory
+        visualization without affecting the simulation state.
+        """
+        if self._model is None or self._data is None:
+            raise ValueError('Call `reset` before getting arm state.')
+
+        return {
+            'qpos_arm': self._data.qpos[self._arm_joint_ids].copy(),
+            'qpos_gripper': self._data.qpos[self._gripper_opening_joint_id].copy(),
+        }
+
+    def render_with_ghost_arms(
+        self,
+        arm_states,
+        ghost_alpha: float = 0.3,
+        camera=None,
+        *args,
+        **kwargs,
+    ):
+        """Render the scene with additional transparent ghost arms.
+
+        Args:
+            arm_states: Iterable of arm state dicts produced by `get_arm_state`.
+            ghost_alpha: Transparency of the ghost arms (0~1).
+            camera: Camera name, same as in `render`.
+            *args, **kwargs: Forwarded to `render`.
+
+        Note:
+            This function temporarily modifies `qpos` and material alpha to draw
+            ghost arms one by one, and restores the original state afterwards.
+        """
+        if self._model is None or self._data is None:
+            raise ValueError('Call `reset` before rendering.')
+
+        # Ensure we work on a list.
+        arm_states = list(arm_states)
+        if len(arm_states) == 0:
+            return self.render(camera=camera, *args, **kwargs)
+
+        # Save current state.
+        qpos_backup = self._data.qpos.copy()
+        qvel_backup = self._data.qvel.copy()
+        mat_rgba_backup = self._model.mat_rgba.copy()
+
+        try:
+            # First render the main arm as usual (kept untouched).
+            base_frame = self.render(camera=camera, *args, **kwargs)
+
+            # Prepare ghost transparency.
+            ghost_alpha = float(np.clip(ghost_alpha, 0.0, 1.0))
+
+            # Convert base to float for blending.
+            base_f = base_frame.astype(np.float64)
+
+            # We'll use per-pixel max to overlay ghosts, avoiding over-bright
+            # additive accumulation.
+            blended = base_f.copy()
+
+            for state in arm_states:
+                # Restore full state before placing each ghost to avoid drift.
+                self._data.qpos[:] = qpos_backup
+                self._data.qvel[:] = qvel_backup
+
+                # Apply the arm joint positions from the saved state.
+                if 'qpos_arm' in state:
+                    self._data.qpos[self._arm_joint_ids] = state['qpos_arm']
+                if 'qpos_gripper' in state:
+                    self._data.qpos[self._gripper_opening_joint_id] = state['qpos_gripper']
+
+                mujoco.mj_forward(self._model, self._data)
+
+                # Set arm materials to ghost_alpha.
+                self._apply_arm_transparency(self._model, ghost_alpha)
+
+                ghost_frame = super(ManipSpaceEnv, self).render(camera=camera, *args, **kwargs).astype(np.float64)
+                blended = np.maximum(blended, ghost_frame)
+
+            # Cast back to original dtype.
+            if np.issubdtype(base_frame.dtype, np.integer):
+                max_val = np.iinfo(base_frame.dtype).max
+            else:
+                max_val = 1.0
+            blended = np.clip(blended, 0.0, float(max_val)).astype(base_frame.dtype)
+            return blended
+        finally:
+            # Restore original state and materials no matter what.
+            self._data.qpos[:] = qpos_backup
+            self._data.qvel[:] = qvel_backup
+            self._model.mat_rgba[:] = mat_rgba_backup
+            mujoco.mj_forward(self._model, self._data)
+
     def render(
         self,
         camera=None,

@@ -21,6 +21,7 @@ class TLManipEnv(ManipSpaceEnv):
         nonoverlapping_regions=True,
         sample_regions_func=None,
         sample_regions_params=None,
+        override_regions=None,
         *args,
         **kwargs,
     ):
@@ -38,6 +39,7 @@ class TLManipEnv(ManipSpaceEnv):
                 - safe_margin: Margin from workspace bounds to sample regions. default: 0.1.
                 - r_range: Range of region radii respecting to the percentage of workspace size. default: (0.02, 0.05).
                 - alpha: Alpha value for region colors. default: 0.6.
+            override_regions: If provided, directly use these regions instead of sampling.
             *args: Additional arguments for the ManipSpaceEnv.
             **kwargs: Additional keyword arguments for the ManipSpaceEnv.
         """
@@ -47,6 +49,12 @@ class TLManipEnv(ManipSpaceEnv):
         self._region_num = region_num
         self._region_type = region_type
         self._nonoverlapping_regions = nonoverlapping_regions
+        self._override_regions = override_regions
+
+        if override_regions is not None:
+            self._regions = override_regions
+        else:
+            self._regions = None
 
         # Dynamic replacement of region sampling function.
         if sample_regions_func is not None:
@@ -76,7 +84,65 @@ class TLManipEnv(ManipSpaceEnv):
             colors.append(rgb)
         return colors
 
+    def set_regions(self, regions):
+        """Set the regions of the environment.
+
+        Args:
+            regions: List of regions, each region is (x, y, z, r, rgba)
+        """
+        self._regions_obs = regions
+
+        # Convert regions from observation space to environment space
+        xyz_center = np.array([0.425, 0.0, 0.0])
+        xyz_scaler = 10.0
+        
+        env_regions = []
+        for region in regions:
+            x, y, z, r, rgba = region
+            # Apply inverse transformation: pos_env = pos_obs / scaler + center
+            # Note: z in obs space is 0-3, z in env space is ~0-0.3. 
+            # The scaler 10.0 works for this.
+            
+            pos_obs = np.array([x, y, z])
+            pos_env = pos_obs / xyz_scaler + xyz_center
+            r_env = r / xyz_scaler
+            
+            env_regions.append((pos_env[0], pos_env[1], pos_env[2], r_env, rgba))
+            
+        self._regions = env_regions
+        self._region_num = len(env_regions)
+
+        # Check if we need to rebuild (more regions than currently allocated)
+        current_capacity = (
+            len(self._region_geoms_list) if hasattr(self, "_region_geoms_list") else 0
+        )
+
+        if self._region_num != current_capacity:
+            # Number of regions changed, force rebuild on next reset
+            self._mjcf_model = None
+            self.mark_dirty()
+            return
+
+        # Update the MuJoCo model if it has been initialized
+        if hasattr(self, "_model") and self._model is not None:
+            for i, region in enumerate(env_regions):
+                x, y, z, r, rgba = region
+
+                # Update position
+                body_id = self._model.body(f"region_{i}").id
+                self._model.body_pos[body_id] = (x, y, z)
+
+                # Update size (radius)
+                geom_id = self._model.geom(f"region_{i}").id
+                self._model.geom_size[geom_id] = (r, 0, 0)
+
+                # Update color
+                self._model.geom_rgba[geom_id] = rgba
+
     def _sample_regions(self, region_num):
+        if self._regions is not None:
+            return self._regions
+
         regions = []
 
         # Only support sphere regions for now.
@@ -151,14 +217,32 @@ class TLManipEnv(ManipSpaceEnv):
             )
         self._regions = regions
         return regions
-    
+
     def get_regions_info(self):
-        """Get the list of regions in the environment.
+        """Get the list of regions in the environment in observation space.
 
         Returns:
             List of regions, each region is (x, y, z, r, rgba)
         """
-        return self._regions
+        if hasattr(self, "_regions_obs") and self._regions_obs is not None:
+            return self._regions_obs
+        
+        if self._regions is None:
+            return []
+
+        # Convert from Env Space to Obs Space
+        xyz_center = np.array([0.425, 0.0, 0.0])
+        xyz_scaler = 10.0
+        
+        obs_regions = []
+        for region in self._regions:
+            x, y, z, r, rgba = region
+            pos_env = np.array([x, y, z])
+            pos_obs = (pos_env - xyz_center) * xyz_scaler
+            r_obs = r * xyz_scaler
+            obs_regions.append((pos_obs[0], pos_obs[1], pos_obs[2], r_obs, rgba))
+            
+        return obs_regions
 
     def set_tasks(self):
         pass
@@ -175,7 +259,12 @@ class TLManipEnv(ManipSpaceEnv):
             x, y, z, r, rgba = region
             region_sphere_mjcf.find("body", "region_template").pos = (x, y, z)
             region_sphere_mjcf.find("geom", "region_geom").size = (r, 0, 0)
-            region_sphere_mjcf.find("geom", "region_geom").rgba = rgba
+            # Ensure rgba is a string of space-separated values for MJCF
+            if isinstance(rgba, (list, tuple, np.ndarray)):
+                rgba_str = " ".join(map(str, rgba))
+            else:
+                rgba_str = str(rgba)
+            region_sphere_mjcf.find("geom", "region_geom").rgba = rgba_str
             region_sphere_mjcf.find("body", "region_template").name = f"region_{i}"
             region_sphere_mjcf.find("geom", "region_geom").name = f"region_{i}"
             arena_mjcf.include_copy(region_sphere_mjcf)
