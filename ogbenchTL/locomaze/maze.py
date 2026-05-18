@@ -391,7 +391,7 @@ def make_maze_env(
                     name="wp_indicator",
                     type="sphere",
                     size=".5",
-                    pos="0 0 .8",
+                    pos="0 0 -1",
                     material="target",
                     contype="0",
                     conaffinity="0",
