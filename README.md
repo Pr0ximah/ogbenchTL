@@ -42,10 +42,8 @@ The key visualization enhancements include:
 - 85 datasets covering various challenges in offline goal-conditioned RL
 - 410 tasks for standard (i.e., non-goal-conditioned) offline RL
 - Support for both pixel-based and state-based observations
-- Clean, well-tuned reference implementations of 6 offline goal-conditioned RL algorithms
-- Fully reproducible scripts for benchmarking and dataset generation
+- Reference algorithm implementations and benchmark/data-generation scripts are available in the [upstream OGBench repository](https://github.com/seohongpark/ogbench); they are not bundled in this environment package.
 - `pip`-installable, easy-to-use APIs based on Gymnasium
-- No major dependencies other than MuJoCo
 
 ### Temporal Logic Visualization Enhancements
 - **Region Visualization**: Circular and rectangular regions with customizable colors and positions
@@ -66,7 +64,7 @@ cd ogbenchTL
 pip install -e .
 ```
 
-It requires Python 3.10+ and has only three dependencies: `mujoco >= 3.1.6`, `dm_control >= 1.0.20`, and `gymnasium`.
+It requires Python 3.10+. Core simulation dependencies are `mujoco >= 3.1.6`, `dm_control >= 1.0.20`, and `gymnasium[mujoco]`; see [pyproject.toml](pyproject.toml) for package requirements.
 
 ## Usage for Temporal Logic Tasks
 
@@ -80,8 +78,9 @@ Create environments with TL visualization support:
 ```python
 import ogbenchTL
 
-env, train_dataset, val_dataset = ogbenchTL.make_env_and_datasets(
+env = ogbenchTL.make_env_and_datasets(
     'antmaze-large-navigate-v0',
+    env_only=True,                 # visualization without dataset downloads
     region_type='circle',          # or 'rect' for rectangular regions  
     max_regions=5,                 # maximum number of regions to visualize
     white_bg=True,                 # enable white background
@@ -93,13 +92,18 @@ env, train_dataset, val_dataset = ogbenchTL.make_env_and_datasets(
 > The following options and region methods apply to **maze environments**. Temporal Logic visualization is **purely visual** and does not affect the underlying task logic or reward structure.
 > 
 > * The original goal/target markers have been **removed** since TL tasks can explicitly represent endpoints through regions and waypoints
-> * Setting `max_regions=0`, `wp_indicator=False`, and `white_bg=False` makes the environment behave exactly like the original OGBench but no goal/target markers will be shown.
+> * Use `max_regions=0`, `wp_indicator=False`, and `white_bg=False` to disable optional maze overlays/background changes. Maze goal markers remain hidden. State dynamics and rewards retain the inherited task behavior; rendered pixels may differ from upstream.
 > * Region type must be consistent throughout the environment lifetime - dynamic switching between circle and rectangle regions is not supported
-> * The total number of regions cannot exceed the `max_regions` value specified during environment creation
+> * The total number of regions cannot exceed `max_regions`. A positive capacity requires `region_type='circle'` or `'rect'`. Invalid additions raise an error without changing existing regions.
+> * With `ob_type='pixels'`, observations have shape `(height, width, 3)` and dtype `uint8`. Pass `height=64, width=64` when using datasets or policies that expect 64×64 images.
 
 > [!CAUTION]
 > When using `ogbenchTL.make_env_and_datasets`, access region methods through `env.unwrapped` (e.g., `env.unwrapped.add_region()`).
 > Direct access like `env.add_region()` may not work due to environment wrappers.
+
+To load benchmark data as well, omit `env_only=True` and unpack
+`env, train_dataset, val_dataset`. This may download the datasets; a local
+`dataset_path` can be supplied instead.
 
 ### Adding Temporal Logic Regions
 
@@ -151,8 +155,9 @@ import ogbenchTL
 import numpy as np
 
 # Create environment with TL visualization
-env, train_dataset, val_dataset = ogbenchTL.make_env_and_datasets(
+env = ogbenchTL.make_env_and_datasets(
     'antmaze-large-navigate-v0',
+    env_only=True,                 # visualization without dataset downloads
     region_type='circle',
     max_regions=3,
     white_bg=True,
@@ -188,6 +193,8 @@ while not done:
     ob, reward, terminated, truncated, info = env.step(action)
     done = terminated or truncated
     frame = env.render()  # Visualize current state with regions and waypoints
+
+env.close()  # release renderer resources
 ```
 
 ## Environment Structure
@@ -235,12 +242,25 @@ ob, info = env.reset(seed=42, options={'task_id': 1})
 
 - `set_regions()` and `get_regions_info()` use normalized state coordinates: `world_xyz = obs_xyz / 10 + [0.425, 0, 0]`, `world_radius = obs_radius / 10`.
 - `override_regions` and `sample_regions_func(region_num)` use **world coordinates**. Automatic sampling uses `region_num`, `region_sample_seed`, and `nonoverlapping_regions`.
-- `sample_regions_params` contains `safe_margin` (world units), `r_range` (fractions of mean workspace extent), and `alpha`. Defaults are `0.1`, `(0.05, 0.2)`, and `0.6`. Invalid ranges or failure to place all regions within 10,000 attempts raise `ValueError`.
+- `sample_regions_params` contains `safe_margin` (world units), `r_range` (fractions of mean workspace extent), and `alpha`. Defaults are `0.1`, `(0.05, 0.2)`, and `0.6`; partial dictionaries override just the supplied fields (e.g. `{'alpha': 0.3}`). Invalid ranges or failure to place all regions within 10,000 attempts raise `ValueError`.
 - For states, the factory maps `tl-manip-play-v0` (or `tl-manip-v0`) to `cube-{env_type}-play-v0`. `dataset_only=True` uses `cur_env` when supplied, otherwise `env_type` (default `single`). Pixel data requires an explicit matching `dataset_path`; environment-only pixel use is supported.
+- `tl-manip-play-oraclerep-v0` loads matching cube data and adds normalized cube positions as `oracle_reps`; environment goals then have `3 * num_cubes` values. Local datasets must include `qpos`. Both environment-plus-data and `dataset_only=True` are supported. TL `singletask` environment IDs are not registered.
 - `visualize_info` controls inherited cube target displays. Cameras, arm transparency, and ghost-arm rendering belong to the manipulation base environment, not exclusively to TLManipEnv.
 - Scene and Puzzle TL integration remains future work.
 
 **Migration from the earlier TLManipEnv:** the previous arm-only state had 19 values and incomplete reward/success methods. The default single-cube state now has 28 values (19 arm values plus 9 cube values); multiple cubes use `19 + 9 * num_cubes`. Old 19-dimensional checkpoints are not directly compatible. Cube success may terminate an episode unless `terminate_at_goal=False`; region entry does not itself produce reward or TL success.
+
+### Reproducibility
+
+For maze and cube/TL manipulation resets, `env.reset(seed=42)` seeds task selection,
+position noise and internal settling actions. User-generated actions are separate:
+seed `env.action_space` (or your policy's RNG) when reproducible rollouts are needed.
+Region sampling has its own `region_sample_seed` and is cached across resets;
+resetting the environment does not resample regions.
+
+The RNG fixes change the trajectories associated with historical seeds. They do
+not change task definitions, rewards or success criteria. Reproducibility assumes
+the same simulation/library versions and environment configuration.
 
 ### Regression Tests
 
@@ -250,7 +270,7 @@ From the repository root, with dependencies installed:
 MUJOCO_GL=egl python -m unittest discover -s tests -v
 ```
 
-Tests cover easy tasks, cube dynamics/observation parity, region updates and rebuilds, bounded sampling, and dataset routing. Dataset routing tests mock file loading and downloads; they do not fetch benchmark data.
+Tests cover easy tasks, cube dynamics/observation parity, region updates and rebuilds, bounded sampling, pixel sizes, seeded resets, resource cleanup and dataset routing. Oracle tests load small temporary NPZ fixtures. No tests download benchmark data.
 
 ## Planned Features
 
@@ -292,4 +312,4 @@ If you use OGBench-TL in your research, please cite both the original OGBench pa
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
+Package metadata declares the MIT license. Bundled robot assets include their own [UR5e license](ogbenchTL/manipspace/descriptions/universal_robots_ur5e/LICENSE) and [Robotiq license](ogbenchTL/manipspace/descriptions/robotiq_2f85/LICENSE).

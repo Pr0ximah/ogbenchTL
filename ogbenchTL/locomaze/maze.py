@@ -1,6 +1,9 @@
+import copy
+import os
 import tempfile
 import xml.etree.ElementTree as ET
 
+import gymnasium as gym
 import mujoco
 import numpy as np
 from gymnasium.spaces import Box
@@ -141,7 +144,7 @@ def make_maze_env(
             """Initialize the maze environment.
 
             Args:
-                maze_type: Maze type. One of 'arena', 'medium', 'large', 'giant', or 'teleport'.
+                maze_type: Maze type. One of 'arena', 'easy', 'medium', 'large', 'giant', or 'teleport'.
                 maze_unit: Size of a maze unit block.
                 maze_height: Height of the maze walls.
                 terminate_at_goal: Whether to terminate the episode when the goal is reached.
@@ -164,12 +167,15 @@ def make_maze_env(
             self._use_oracle_rep = use_oracle_rep
             assert ob_type in ["states", "pixels"]
 
-            if wp_indicator:
-                self._wp_indicator = True
+            self._wp_indicator = bool(wp_indicator)
 
             # Define regions
             self._regions = []
             self._max_regions = max_regions if max_regions is not None else 0
+            if not isinstance(self._max_regions, (int, np.integer)) or self._max_regions < 0:
+                raise ValueError("max_regions must be a nonnegative integer.")
+            if self._max_regions and region_type not in ("circle", "rect"):
+                raise ValueError("Positive max_regions requires region_type='circle' or 'rect'.")
 
             # Define constants.
             self._offset_x = 4
@@ -203,10 +209,13 @@ def make_maze_env(
             xml_file = self.xml_file
             tree = ET.parse(xml_file)
             self.update_tree(tree)
-            _, maze_xml_file = tempfile.mkstemp(text=True, suffix=".xml")
-            tree.write(maze_xml_file)
-
-            super().__init__(xml_file=maze_xml_file, *args, **kwargs)
+            fd, maze_xml_file = tempfile.mkstemp(text=True, suffix=".xml")
+            os.close(fd)
+            try:
+                tree.write(maze_xml_file)
+                super().__init__(xml_file=maze_xml_file, *args, **kwargs)
+            finally:
+                os.unlink(maze_xml_file)
 
             # Make custom camera.
             if self.camera_id is None and self.camera_name is None:
@@ -237,7 +246,7 @@ def make_maze_env(
             self.custom_renderer = None
             if self._ob_type == "pixels":
                 self.observation_space = Box(
-                    low=0, high=255, shape=(64, 64, 3), dtype=np.uint8
+                    low=0, high=255, shape=(self.height, self.width, 3), dtype=np.uint8
                 )
 
                 # Manually color the floor to enable the agent to infer its position from the observation.
@@ -443,6 +452,7 @@ def make_maze_env(
                     geom.pos[1] = 0
                     geom.pos[2] = -1
             self._regions = []
+            mujoco.mj_forward(self.model, self.data)
 
         def add_region(self, region):
             """Add a region to the environment.
@@ -450,35 +460,28 @@ def make_maze_env(
             Args:
                 region: A dictionary containing region information.
             """
-            assert (
-                len(self._regions) < self._max_regions
-            ), "Maximum number of regions reached."
-            self._regions.append(region)
-            if region["shape"] == "circle":
-                geom_name = f"region_circ_{len(self._regions) - 1}"
-                geom = self.model.geom(geom_name)
-                geom.size[0] = region["radius"]
-                geom.pos[0] = region["center"][0]
-                geom.pos[1] = region["center"][1]
-                geom.pos[2] = 0.05
-                geom.rgba[0] = region["color"][0]
-                geom.rgba[1] = region["color"][1]
-                geom.rgba[2] = region["color"][2]
-                geom.rgba[3] = region["color"][3]
-            elif region["shape"] == "rect":
-                geom_name = f"region_rect_{len(self._regions) - 1}"
-                geom = self.model.geom(geom_name)
-                geom.size[0] = region["size"][0] / 2.0
-                geom.size[1] = region["size"][1] / 2.0
-                geom.pos[0] = region["center"][0]
-                geom.pos[1] = region["center"][1]
-                geom.pos[2] = 0.05
-                geom.rgba[0] = region["color"][0]
-                geom.rgba[1] = region["color"][1]
-                geom.rgba[2] = region["color"][2]
-                geom.rgba[3] = region["color"][3]
-            else:
-                raise ValueError(f"Unknown region shape: {region['shape']}")
+            # Validate before changing either the scene or its region bookkeeping.
+            if len(self._regions) >= self._max_regions:
+                raise ValueError("Maximum number of regions reached.")
+            if region.get("shape") != region_type:
+                raise ValueError(f"Region shape must match region_type={region_type!r}.")
+            center = np.asarray(region["center"], dtype=float)
+            color = np.asarray(region["color"], dtype=float)
+            size = np.asarray([region["radius"]] if region_type == "circle" else region["size"], dtype=float)
+            expected_size = (1,) if region_type == "circle" else (2,)
+            if (center.shape != (2,) or not np.all(np.isfinite(center))
+                    or color.shape != (4,) or not np.all(np.isfinite(color))
+                    or np.any((color < 0) | (color > 1))
+                    or size.shape != expected_size or not np.all(np.isfinite(size))
+                    or np.any(size <= 0)):
+                raise ValueError("Region requires a finite 2-D center, positive size and RGBA in [0, 1].")
+            prefix = "region_circ" if region_type == "circle" else "region_rect"
+            geom = self.model.geom(f"{prefix}_{len(self._regions)}")
+            geom.size[:len(size)] = size if region_type == "circle" else size / 2
+            geom.pos[:] = (*center, 0.05)
+            geom.rgba[:] = color
+            self._regions.append(copy.deepcopy(region))
+            mujoco.mj_forward(self.model, self.data)
 
         def set_wp_indicator(self, position, wp_color=None):
             """Set the waypoint indicator position.
@@ -503,13 +506,17 @@ def make_maze_env(
             geom.pos[0] = position[0]
             geom.pos[1] = position[1]
             geom.pos[2] = 0.8
+            mujoco.mj_forward(self.model, self.data)
 
         def reset_wp_indicator(self):
             """Reset the waypoint indicator position."""
+            if not self._wp_indicator:
+                return
             geom = self.model.geom("wp_indicator")
             geom.pos[0] = 0
             geom.pos[1] = 0
             geom.pos[2] = -1
+            mujoco.mj_forward(self.model, self.data)
 
         def set_tasks(self):
             # `tasks` is a list of tasks, where each task is a list of two tuples: (init_ij, goal_ij).
@@ -585,6 +592,8 @@ def make_maze_env(
             self.render()
 
         def reset(self, options=None, *args, **kwargs):
+            # Seed before sampling task IDs, positions or settling actions.
+            gym.Env.reset(self, seed=kwargs.pop("seed", None))
             if options is None:
                 options = {}
             # Set the task goal.
@@ -608,7 +617,7 @@ def make_maze_env(
                 self.cur_task_info = options["task_info"]
             else:
                 # Randomly sample a task.
-                self.cur_task_id = np.random.randint(1, self.num_tasks + 1)
+                self.cur_task_id = self.np_random.integers(1, self.num_tasks + 1)
                 self.cur_task_info = self.task_infos[self.cur_task_id - 1]
 
             # Whether to provide a rendering of the goal.
@@ -628,7 +637,7 @@ def make_maze_env(
             # Do a few random steps to stabilize the environment.
             num_random_actions = 40 if loco_env_type == "humanoid" else 5
             for _ in range(num_random_actions):
-                super().step(self.action_space.sample())
+                super().step(self.np_random.uniform(self.action_space.low, self.action_space.high))
 
             # Save the goal observation.
             self.set_goal(goal_xy=goal_xy)
@@ -660,7 +669,7 @@ def make_maze_env(
                     ):
                         # Teleport the agent to a random outbound teleport.
                         teleport_out_xy = self._teleport_info["teleport_out_xys"][
-                            np.random.randint(
+                            self.np_random.integers(
                                 len(self._teleport_info["teleport_out_xys"])
                             )
                         ]
@@ -682,6 +691,12 @@ def make_maze_env(
                 reward = reward - 1.0  # -1 (failure) or 0 (success).
 
             return ob, reward, terminated, truncated, info
+
+        def close(self):
+            if getattr(self, "custom_renderer", None) is not None:
+                self.custom_renderer.close()
+                self.custom_renderer = None
+            super().close()
 
         def render(self):
             if self.custom_renderer is None:
@@ -819,12 +834,12 @@ def make_maze_env(
 
         def add_noise(self, xy):
             random_x = (
-                np.random.uniform(low=-self._noise, high=self._noise)
+                self.np_random.uniform(low=-self._noise, high=self._noise)
                 * self._maze_unit
                 / 4
             )
             random_y = (
-                np.random.uniform(low=-self._noise, high=self._noise)
+                self.np_random.uniform(low=-self._noise, high=self._noise)
                 * self._maze_unit
                 / 4
             )
@@ -892,6 +907,8 @@ def make_maze_env(
                 self._reward_task_id = 4  # Default task.
 
         def reset(self, options=None, *args, **kwargs):
+            # Seed before sampling task IDs, positions or settling actions.
+            gym.Env.reset(self, seed=kwargs.pop("seed", None))
             if options is None:
                 options = {}
             # Set the task goal.
@@ -915,7 +932,7 @@ def make_maze_env(
                 self.cur_task_info = options["task_info"]
             else:
                 # Randomly sample a task.
-                self.cur_task_id = np.random.randint(1, self.num_tasks + 1)
+                self.cur_task_id = self.np_random.integers(1, self.num_tasks + 1)
                 self.cur_task_info = self.task_infos[self.cur_task_id - 1]
 
             # Whether to provide a rendering of the goal.
@@ -939,7 +956,7 @@ def make_maze_env(
 
             # Do a few random steps to stabilize the environment.
             for _ in range(10):
-                super(MazeEnv, self).step(self.action_space.sample())
+                super(MazeEnv, self).step(self.np_random.uniform(self.action_space.low, self.action_space.high))
 
             # Save the goal observation.
             self.set_goal(goal_xy=goal_xy)

@@ -117,7 +117,8 @@ def add_oracle_reps(env_name, env, dataset):
         window_scaler = 15.0
 
         if 'cube' in env_name:
-            num_cubes = env.unwrapped._num_cubes
+            num_cubes = (env.unwrapped._num_cubes if env is not None else
+                         {'single': 1, 'double': 2, 'triple': 3, 'quadruple': 4, 'octuple': 8}[env_name.split('-')[1]])
 
             cube_xyzs_list = []
             for i in range(num_cubes):

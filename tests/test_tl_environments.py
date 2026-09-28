@@ -39,10 +39,8 @@ class RegionTests(unittest.TestCase):
             with self.subTest(variant=variant):
                 cube = CubeEnv(env_type=variant)
                 tl = TLManipEnv(env_type=variant, region_num=3)
-                # Supply identical random settling actions used by CubeEnv reset.
-                with patch('gymnasium.spaces.Box.sample', return_value=np.zeros(5)):
-                    a, ai = cube.reset(seed=42, options={'task_id': 1})
-                    b, bi = tl.reset(seed=42, options={'task_id': 1})
+                a, ai = cube.reset(seed=42, options={'task_id': 1})
+                b, bi = tl.reset(seed=42, options={'task_id': 1})
                 np.testing.assert_allclose(a, b)
                 np.testing.assert_allclose(ai['goal'], bi['goal'])
                 for action in np.random.RandomState(12).uniform(-.3, .3, (5, 5)):
@@ -86,8 +84,7 @@ class RegionTests(unittest.TestCase):
             env.set_regions([(1., 1., 1., .5, (1., 0., 0., .5))])
             self.assertEqual(env.compute_observation().shape, ob.shape)
         finally:
-            if env._renderer is not None:
-                env._renderer.close()
+            env.close()
 
     def test_custom_sampler_and_world_override(self):
         world = [(.425, .1, .1, .05, (1., 0., 0., .5))]

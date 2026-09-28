@@ -42,21 +42,26 @@ class TLManipEnv(CubeEnv):
         Sampled and overridden regions retain the historical world-coordinate
         convention.
         """
-        assert region_num >= 0, "region_num must be greater than or equal to 0."
+        if not isinstance(region_num, (int, np.integer)) or region_num < 0:
+            raise ValueError("region_num must be a nonnegative integer.")
+        if region_type != "sphere":
+            raise ValueError("Only spherical TL regions are supported.")
 
         self._region_sample_seed = region_sample_seed
         self._region_num = region_num
         self._region_type = region_type
         self._nonoverlapping_regions = nonoverlapping_regions
-        self._regions = override_regions
+        self._regions = None if override_regions is None else self._validate_regions(override_regions)
         self._regions_obs = None
         self._region_geoms_list = []
         self._sample_regions_func = sample_regions_func
-        self._sample_regions_params = sample_regions_params or {
+        self._sample_regions_params = {
             "safe_margin": 0.1,
             "r_range": (0.05, 0.2),
             "alpha": 0.6,
         }
+        if sample_regions_params is not None:
+            self._sample_regions_params.update(sample_regions_params)
 
         super().__init__(
             env_type=env_type,
@@ -64,6 +69,20 @@ class TLManipEnv(CubeEnv):
             *args,
             **kwargs,
         )
+
+    @staticmethod
+    def _validate_regions(regions):
+        """Copy and validate a complete update before touching simulation state."""
+        result = []
+        for x, y, z, r, rgba in regions:
+            values = np.asarray((x, y, z, r), dtype=float)
+            color = np.asarray(rgba, dtype=float)
+            if (not np.all(np.isfinite(values)) or values[3] <= 0
+                    or color.shape != (4,) or not np.all(np.isfinite(color))
+                    or np.any((color < 0) | (color > 1))):
+                raise ValueError("Regions require finite centers, positive radii and RGBA in [0, 1].")
+            result.append((*values.tolist(), tuple(color.tolist())))
+        return result
 
     def _generate_colors(self, n, s_range=(0.7, 1.0), v_range=(0.7, 1.0)):
         golden_ratio_conjugate = (1 + np.sqrt(5)) / 2 - 1
@@ -78,7 +97,7 @@ class TLManipEnv(CubeEnv):
 
     def set_regions(self, regions):
         """Set visual regions supplied in normalized observation coordinates."""
-        self._regions_obs = list(regions)
+        self._regions_obs = self._validate_regions(regions)
         self._regions = [
             (
                 *(
@@ -122,13 +141,16 @@ class TLManipEnv(CubeEnv):
         if self._region_type != "sphere":
             raise NotImplementedError(f"Region type {self._region_type} not implemented.")
         if self._sample_regions_func is not None:
-            self._regions = self._sample_regions_func(region_num)
+            self._regions = self._validate_regions(self._sample_regions_func(region_num))
             return self._regions
 
         if region_num == 0:
             self._regions = []
             return self._regions
-        safe_margin = self._sample_regions_params["safe_margin"]
+        safe_margin = float(self._sample_regions_params["safe_margin"])
+        alpha = float(self._sample_regions_params["alpha"])
+        if not np.isfinite(alpha) or not 0 <= alpha <= 1:
+            raise ValueError("alpha must be finite and in [0, 1].")
         workspace_bound = self._workspace_bounds
         lower = workspace_bound[0] + safe_margin
         upper = workspace_bound[1] - safe_margin
@@ -175,7 +197,7 @@ class TLManipEnv(CubeEnv):
     def get_regions_info(self):
         """Return regions in normalized state-observation coordinates."""
         if self._regions_obs is not None:
-            return self._regions_obs
+            return list(self._regions_obs)
         if self._regions is None:
             return []
         return [

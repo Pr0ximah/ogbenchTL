@@ -234,8 +234,9 @@ def make_env_and_datasets(
 
     if 'oraclerep' in splits:
         # Add oracle goal representations to the datasets.
-        add_oracle_reps(env_name, env, train_dataset)
-        add_oracle_reps(env_name, env, val_dataset)
+        oracle_env_name = f"cube-{env_type}-v0" if env_name == 'tl-manip-v0' else env_name
+        add_oracle_reps(oracle_env_name, env, train_dataset)
+        add_oracle_reps(oracle_env_name, env, val_dataset)
 
     if not add_info:
         # Remove information keys.

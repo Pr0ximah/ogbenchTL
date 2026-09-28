@@ -619,7 +619,7 @@ class CubeEnv(ManipSpaceEnv):
 
             # Do a few random steps to make the scene stable.
             for _ in range(2):
-                self.step(self.action_space.sample())
+                self.step(self.np_random.uniform(-1.0, 1.0, size=5))
 
             # Save the goal observation.
             self._cur_goal_ob = (

@@ -359,6 +359,14 @@ class CustomMuJoCoEnv(gym.Env, abc.ABC):
         yield self._passive_viewer_handle
         self.close_passive_viewer()
 
+    def close(self):
+        """Release offscreen rendering and passive-viewer resources."""
+        self.close_passive_viewer()
+        if self._renderer is not None:
+            self._renderer.close()
+            self._renderer = None
+        super().close()
+
     def _initialize_renderer(self):
         """Initialize the renderer."""
         if self._model is None:

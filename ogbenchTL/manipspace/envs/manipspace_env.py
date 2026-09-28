@@ -157,12 +157,9 @@ class ManipSpaceEnv(CustomMuJoCoEnv):
 
     @property
     def action_space(self):
-        return gym.spaces.Box(
-            low=-np.ones(5),
-            high=np.ones(5),
-            shape=(5,),
-            dtype=np.float32,
-        )
+        if not hasattr(self, '_action_space'):
+            self._action_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(5,), dtype=np.float32)
+        return self._action_space
 
     def normalize_action(self, action):
         """Normalize the action to the range [-1, 1]."""
@@ -308,6 +305,7 @@ class ManipSpaceEnv(CustomMuJoCoEnv):
         pass
 
     def reset(self, options=None, *args, **kwargs):
+        gym.Env.reset(self, seed=kwargs.pop('seed', None))
         if self._mode == 'task':
             # Set the task goal.
             if options is None:
@@ -330,7 +328,7 @@ class ManipSpaceEnv(CustomMuJoCoEnv):
             else:
                 # Randomly sample a task.
                 try:
-                    self.cur_task_id = np.random.randint(1, self.num_tasks + 1)
+                    self.cur_task_id = self.np_random.integers(1, self.num_tasks + 1)
                     self.cur_task_info = self.task_infos[self.cur_task_id - 1]
                 except Exception:
                     # print("Error sampling task ID. No task provided.")
