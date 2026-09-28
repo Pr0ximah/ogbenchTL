@@ -21,6 +21,16 @@ MAZE_MAPS = {
         [1, 0, 0, 0, 0, 0, 0, 1],
         [1, 1, 1, 1, 1, 1, 1, 1],
     ],
+    "easy": [
+        [1, 1, 1, 1, 1, 1, 1, 1],
+        [1, 0, 0, 0, 0, 1, 0, 1],
+        [1, 0, 0, 0, 0, 1, 0, 1],
+        [1, 0, 1, 0, 0, 0, 0, 1],
+        [1, 0, 1, 1, 0, 0, 0, 1],
+        [1, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 0, 0, 0, 0, 0, 1],
+        [1, 1, 1, 1, 1, 1, 1, 1],
+    ],
     "medium": [
         [1, 1, 1, 1, 1, 1, 1, 1],
         [1, 0, 0, 1, 1, 0, 0, 1],
@@ -71,6 +81,7 @@ MAZE_MAPS = {
 
 CAMERA_SETTINGS = {
     # Lookat1, Lookat2, Distance
+    "easy": (10, 10, 33),
     "medium": (10, 10, 33),
     "large": (18, 12, 39),
     "giant": (25, 18, 53.5),
@@ -168,7 +179,7 @@ def make_maze_env(
 
             # Define maze map.
             self._teleport_info = None
-            if self._maze_type in ["arena", "medium", "large", "giant"]:
+            if self._maze_type in ["arena", "easy", "medium", "large", "giant"]:
                 maze_map = MAZE_MAPS[self._maze_type]
             elif self._maze_type == "teleport":
                 maze_map = MAZE_MAPS["teleport"]
@@ -505,6 +516,14 @@ def make_maze_env(
             if self._maze_type == "arena":
                 tasks = [
                     [(1, 1), (6, 6)],
+                ]
+            elif self._maze_type == 'easy':
+                tasks = [
+                    [(1, 1), (6, 6)],
+                    [(1, 6), (6, 1)],
+                    [(3, 1), (3, 6)],
+                    [(1, 3), (6, 3)],
+                    [(2, 2), (5, 5)],
                 ]
             elif self._maze_type == "medium":
                 tasks = [

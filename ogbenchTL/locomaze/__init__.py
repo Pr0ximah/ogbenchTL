@@ -54,6 +54,16 @@ register(
 )
 
 register(
+    id='antmaze-easy-v0',
+    entry_point='ogbenchTL.locomaze.maze:make_maze_env',
+    max_episode_steps=1000,
+    kwargs=dict(
+        loco_env_type='ant',
+        maze_env_type='maze',
+        maze_type='easy',
+    ),
+)
+register(
     id='antmaze-medium-v0',
     entry_point='ogbenchTL.locomaze.maze:make_maze_env',
     max_episode_steps=1000,
