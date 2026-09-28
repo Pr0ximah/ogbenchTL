@@ -160,7 +160,11 @@ def make_env_and_datasets(
     splits = dataset_name.split('-')
     dataset_add_info = add_info
     env = cur_env
-    if 'singletask' in splits:
+    if dataset_name in ('tl-manip-v0', 'tl-manip-play-v0'):
+        env_name = 'tl-manip-v0'
+        if not dataset_only:
+            env = gymnasium.make(env_name, **env_kwargs)
+    elif 'singletask' in splits:
         # Single-task environment.
         pos = splits.index('singletask')
         env_name = '-'.join(splits[: pos - 1] + splits[pos:])  # Remove the dataset type.
@@ -184,9 +188,16 @@ def make_env_and_datasets(
     if env_only:
         return env
 
-    # @NOTE: Add dataset mapping for TLEnv
+    # Match the cube variant represented by the TL visualization environment.
     if env_name == "tl-manip-v0":
-        dataset_name = "cube-single-play-v0"
+        base_env = env.unwrapped if env is not None else None
+        env_type = getattr(base_env, '_env_type', env_kwargs.get('env_type', 'single'))
+        ob_type = getattr(base_env, '_ob_type', env_kwargs.get('ob_type', 'states'))
+        if env_type not in ('single', 'double', 'triple', 'quadruple', 'octuple'):
+            raise ValueError(f'Invalid TL cube env_type: {env_type}')
+        if ob_type != 'states' and dataset_path is None:
+            raise ValueError('TL pixel observations require an explicit matching dataset_path.')
+        dataset_name = f"cube-{env_type}-play-v0"
 
     # Load datasets.
     if dataset_path is None:
@@ -198,7 +209,8 @@ def make_env_and_datasets(
         train_dataset_path = dataset_path
         val_dataset_path = dataset_path.replace('.npz', '-val.npz')
 
-    ob_dtype = np.uint8 if ('visual' in env_name or 'powderworld' in env_name) else np.float32
+    ob_dtype = np.uint8 if ('visual' in env_name or 'powderworld' in env_name
+                              or (env_name == 'tl-manip-v0' and ob_type == 'pixels')) else np.float32
     action_dtype = np.int32 if 'powderworld' in env_name else np.float32
     train_dataset = load_dataset(
         train_dataset_path,
